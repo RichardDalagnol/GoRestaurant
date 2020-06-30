@@ -10,6 +10,7 @@ import IOrdersRepository from '../repositories/IOrdersRepository';
 interface IProduct {
   id: string;
   quantity: number;
+  price: number;
 }
 
 interface IRequest {
@@ -20,13 +21,64 @@ interface IRequest {
 @injectable()
 class CreateOrderService {
   constructor(
+    @inject('OrdersRepository')
     private ordersRepository: IOrdersRepository,
+    @inject('ProductsRepository')
     private productsRepository: IProductsRepository,
+    @inject('CustomersRepository')
     private customersRepository: ICustomersRepository,
-  ) {}
+  ) { }
 
   public async execute({ customer_id, products }: IRequest): Promise<Order> {
-    // TODO
+    const customer = await this.customersRepository.findById(customer_id);
+
+    if (!customer) {
+      throw new AppError('ID is wrong');
+    }
+
+    const currentStockList = await this.productsRepository.findAllById(
+      products,
+    );
+
+    if (currentStockList.length !== products.length) {
+      throw new AppError('Product does not exist');
+    }
+
+    const remainingProductList = [] as IProduct[];
+    const orderedProductList = [] as IProduct[];
+
+    products.forEach(orderedProduct => {
+      const currentStock = currentStockList.find(
+        product => product.id === orderedProduct.id,
+      );
+      if (!currentStock) {
+        throw new AppError('Product does not exist');
+      }
+      if (orderedProduct.quantity > currentStock.quantity) {
+        throw new AppError('Insuficient quantity');
+      }
+      remainingProductList.push({
+        ...currentStock,
+        quantity: currentStock.quantity - orderedProduct.quantity,
+      });
+      orderedProductList.push({
+        ...currentStock,
+        quantity: orderedProduct.quantity,
+      });
+    });
+
+    await this.productsRepository.updateQuantity(remainingProductList);
+
+    const iProductList = orderedProductList.map(product => ({
+      product_id: product.id,
+      price: product.price,
+      quantity: product.quantity,
+    }));
+
+    return this.ordersRepository.create({
+      customer,
+      products: iProductList,
+    });
   }
 }
 
